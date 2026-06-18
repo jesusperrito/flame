@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Flame Stamps</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=EB+Garamond:ital@0;1&display=swap');
+
+  :root{
+    --cream:#FAF6EC;
+    --ink:#211A15;
+    --flame:#B5391C;
+    --ember:#6E2410;
+  }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{
+    margin:0; padding:0; width:100%; height:100%;
+    background:var(--ink); overflow:hidden;
+    touch-action:none; user-select:none;
+    font-family:'EB Garamond', Georgia, serif;
+  }
+  #stage{ position:fixed; inset:0; }
+  video{ display:none; }
+  canvas#view{ position:absolute; inset:0; display:block; }
+
+  .hint{
+    position:absolute; left:0; right:0; bottom:14%;
+    text-align:center; color:#fff; font-style:italic;
+    font-size:14px; letter-spacing:.04em; opacity:0.85;
+    pointer-events:none; transition:opacity 1.2s ease;
+  }
+  .hint.hidden{ opacity:0; }
+
+  .dots{
+    position:absolute; left:0; right:0; bottom:6%;
+    display:flex; justify-content:center; gap:8px;
+    pointer-events:none;
+  }
+  .dot{ width:6px; height:6px; border-radius:50%; background:rgba(255,255,255,.35); transition:.3s; }
+  .dot.active{ background:var(--cream); transform:scale(1.3); }
+
+  .album-btn{
+    position:absolute; top:max(18px, env(safe-area-inset-top)); right:18px;
+    width:42px; height:42px; border-radius:50%;
+    background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.4);
+    color:var(--cream); display:flex; align-items:center; justify-content:center;
+    font-size:18px; backdrop-filter:blur(2px);
+  }
+  .album-btn .count{
+    position:absolute; bottom:-4px; right:-4px;
+    background:var(--flame); color:var(--cream); font-size:10px;
+    width:16px; height:16px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    font-family:Georgia, serif;
+  }
+
+  .flash{ position:absolute; inset:0; background:#000; opacity:0; pointer-events:none; }
+
+  .caption-sheet{
+    position:absolute; left:0; right:0; bottom:0;
+    background:var(--cream); border-radius:18px 18px 0 0;
+    padding:18px 20px max(18px, env(safe-area-inset-bottom));
+    transform:translateY(110%); transition:transform .5s cubic-bezier(.2,.8,.2,1);
+    box-shadow:0 -8px 30px rgba(0,0,0,.3);
+  }
+  .caption-sheet.show{ transform:translateY(0); }
+  .caption-sheet .label{
+    font-family:'Cormorant Garamond', serif; font-style:italic; color:var(--ember);
+    font-size:13px; letter-spacing:.06em; margin-bottom:8px;
+  }
+  .caption-sheet input{
+    width:100%; border:none; border-bottom:1px solid rgba(0,0,0,.2);
+    background:transparent; font-family:'EB Garamond', serif; font-size:17px;
+    color:var(--ink); padding:6px 0 10px; outline:none;
+  }
+  .caption-actions{ display:flex; justify-content:flex-end; gap:18px; margin-top:14px; }
+  .caption-actions button{
+    background:none; border:none; font-family:'Cormorant Garamond', serif;
+    font-size:15px; letter-spacing:.04em; color:var(--ember); padding:4px 2px;
+  }
+  .caption-actions button.save{ color:var(--flame); font-weight:600; }
+
+  .album-view{
+    position:fixed; inset:0; background:var(--cream);
+    transform:translateY(100%); transition:transform .45s ease;
+    overflow-y:auto; -webkit-overflow-scrolling:touch; touch-action:pan-y;
+    z-index:10;
+  }
+  .album-view.show{ transform:translateY(0); }
+  .album-header{
+    display:flex; align-items:baseline; justify-content:space-between;
+    padding:max(20px, env(safe-area-inset-top)) 22px 10px;
+  }
+  .album-header h1{
+    font-family:'Cormorant Garamond', serif; font-weight:600; font-style:italic;
+    font-size:26px; color:var(--ink); margin:0;
+  }
+  .album-header .close{ font-size:26px; color:var(--ember); background:none; border:none; line-height:1; }
+  .album-grid{
+    display:grid; grid-template-columns:repeat(3,1fr); gap:14px;
+    padding:14px 18px 60px;
+  }
+  .stamp-card{ display:flex; flex-direction:column; align-items:center; }
+  .stamp-card img{ width:100%; aspect-ratio:1/1; object-fit:contain; }
+  .stamp-card .cap{
+    font-size:11px; color:var(--ember); font-style:italic; margin-top:4px;
+    text-align:center; line-height:1.2;
+  }
+  .album-empty{ padding:60px 30px; text-align:center; color:var(--ember); font-style:italic; }
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <video id="cam" autoplay muted playsinline webkit-playsinline></video>
+  <canvas id="view"></canvas>
+  <div class="hint" id="hint">tap to capture &middot; swipe to change shape</div>
+  <div class="dots" id="dots"></div>
+  <div class="album-btn" id="albumBtn">&#10022;<span class="count" id="albumCount">0</span></div>
+  <div class="flash" id="flash"></div>
+
+  <div class="caption-sheet" id="captionSheet">
+    <div class="label">add a line, or leave it quiet</div>
+    <input id="captionInput" type="text" placeholder="a word, a place, a time&hellip;" maxlength="60">
+    <div class="caption-actions">
+      <button id="skipBtn">skip</button>
+      <button class="save" id="saveBtn">save</button>
+    </div>
+  </div>
+</div>
+
+<div class="album-view" id="albumView">
+  <div class="album-header">
+    <h1>the album</h1>
+    <button class="close" id="closeAlbum">&times;</button>
+  </div>
+  <div class="album-grid" id="albumGrid"></div>
+</div>
+
+<script>
+(function(){
+  const video = document.getElementById('cam');
+  const canvas = document.getElementById('view');
+  const ctx = canvas.getContext('2d');
+  const hint = document.getElementById('hint');
+  const dotsEl = document.getElementById('dots');
+  const flashEl = document.getElementById('flash');
+  const albumBtn = document.getElementById('albumBtn');
+  const albumCountEl = document.getElementById('albumCount');
+  const albumView = document.getElementById('albumView');
+  const albumGrid = document.getElementById('albumGrid');
+  const closeAlbumBtn = document.getElementById('closeAlbum');
+  const captionSheet = document.getElementById('captionSheet');
+  const captionInput = document.getElementById('captionInput');
+  const saveBtn = document.getElementById('saveBtn');
+  const skipBtn = document.getElementById('skipBtn');
+
+  const SHAPES = ['petal', 'circle', 'flower'];
+  let shapeIndex = 0;
+  let dpr = Math.max(1, window.devicePixelRatio || 1);
+  let cw = 0, ch = 0;
+  let pendingStamp = null;
+  let cooldown = false;
+  const COOLDOWN_MS = 2200;
+
+  let album = [];
+  try { album = JSON.parse(localStorage.getItem('flamestamps_album') || '[]'); } catch (e) { album = []; }
+
+  function saveAlbum(){
+    try { localStorage.setItem('flamestamps_album', JSON.stringify(album)); }
+    catch (e) { console.warn('album storage full or unavailable', e); }
+    albumCountEl.textContent = album.length;
+  }
+
+  // ---------- shape paths ----------
+  // Hand-drawn approximations of the petal / circle / flower marks.
+  // Swap in exact SVG path data here once you share the real files.
+
+  function petalSubpath(c, scale, rot){
+    c.save();
+    c.rotate(rot || 0);
+    const s = scale;
+    c.moveTo(0, 0);
+    c.bezierCurveTo(-0.05*s, -0.34*s, -0.30*s, -0.52*s, -0.33*s, -0.70*s);
+    c.bezierCurveTo(-0.35*s, -0.82*s, -0.27*s, -0.80*s, -0.24*s, -0.88*s);
+    c.bezierCurveTo(-0.21*s, -0.95*s, -0.10*s, -0.86*s, -0.05*s, -0.94*s);
+    c.bezierCurveTo(0,      -1.00*s, 0,       -1.00*s, 0.05*s,  -0.94*s);
+    c.bezierCurveTo(0.10*s, -0.86*s, 0.21*s,  -0.95*s, 0.24*s,  -0.88*s);
+    c.bezierCurveTo(0.27*s, -0.80*s, 0.35*s,  -0.82*s, 0.33*s,  -0.70*s);
+    c.bezierCurveTo(0.30*s, -0.52*s, 0.05*s,  -0.34*s, 0, 0);
+    c.closePath();
+    c.restore();
+  }
+
+  function scallopedCircleSubpaths(c, scale){
+    const R = 0.42*scale, bumpR = 0.11*scale, bumps = 11;
+    c.moveTo(R, 0);
+    c.arc(0, 0, R, 0, Math.PI*2);
+    for (let i = 0; i < bumps; i++){
+      const a = (i/bumps)*Math.PI*2;
+      const bx = Math.cos(a)*R*0.94, by = Math.sin(a)*R*0.94;
+      c.moveTo(bx+bumpR, by);
+      c.arc(bx, by, bumpR, 0, Math.PI*2);
+    }
+  }
+
+  function buildShapePath(c, type, scale){
+    c.beginPath();
+    if (type === 'petal'){
+      petalSubpath(c, scale, 0);
+    } else if (type === 'circle'){
+      scallopedCircleSubpaths(c, scale);
+    } else if (type === 'flower'){
+      for (let i = 0; i < 5; i++){
+        petalSubpath(c, scale*0.62, i*(Math.PI*2/5));
+      }
+    }
+  }
+
+  // tight bounding frame per shape, used only when cropping the final stamp
+  // (keeps the saved PNG snug instead of padded into a generic square)
+  function shapeFrame(type, scale){
+    const margin = 0.05*scale;
+    if (type === 'petal'){
+      const w = 0.7*scale + 2*margin;
+      const h = 1.0*scale + 2*margin;
+      return { w, h, tx: w/2, ty: h-margin };
+    }
+    if (type === 'circle'){
+      const r = 0.53*scale;
+      const w = 2*r + 2*margin;
+      return { w, h: w, tx: w/2, ty: w/2 };
+    }
+    const r = 0.62*scale; // flower
+    const w = 2*r + 2*margin;
+    return { w, h: w, tx: w/2, ty: w/2 };
+  }
+
+  // ---------- camera ----------
+  async function startCamera(){
+    try{
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 1280 } },
+        audio: false
+      });
+      video.srcObject = stream;
+      await video.play();
+      resize();
+      requestAnimationFrame(draw);
+    } catch (err){
+      showCameraError(err);
+    }
+  }
+
+  function showCameraError(err){
+    ctx.fillStyle = '#211A15';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    hint.textContent = 'camera unavailable \u2014 open this over https or localhost, and allow camera access';
+    hint.classList.remove('hidden');
+    console.error(err);
+  }
+
+  function resize(){
+    cw = window.innerWidth; ch = window.innerHeight;
+    dpr = Math.max(1, window.devicePixelRatio || 1);
+    canvas.width = cw*dpr; canvas.height = ch*dpr;
+    canvas.style.width = cw+'px'; canvas.style.height = ch+'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+
+  function coverParams(vw, vh, boxW, boxH){
+    const scale = Math.max(boxW/vw, boxH/vh);
+    const drawW = vw*scale, drawH = vh*scale;
+    const dx = (boxW-drawW)/2, dy = (boxH-drawH)/2;
+    return { scale, drawW, drawH, dx, dy };
+  }
+
+  function shapeScale(){
+    return Math.min(cw, ch)*0.62;
+  }
+
+  function draw(){
+    if (!video.videoWidth){ requestAnimationFrame(draw); return; }
+    const vw = video.videoWidth, vh = video.videoHeight;
+    const cover = coverParams(vw, vh, cw, ch);
+
+    ctx.clearRect(0, 0, cw, ch);
+    ctx.drawImage(video, cover.dx, cover.dy, cover.drawW, cover.drawH);
+
+    ctx.fillStyle = 'rgba(18,10,6,0.55)';
+    ctx.fillRect(0, 0, cw, ch);
+
+    const scale = shapeScale();
+    ctx.save();
+    ctx.translate(cw/2, ch/2);
+    buildShapePath(ctx, SHAPES[shapeIndex], scale);
+    ctx.clip();
+    ctx.translate(-cw/2, -ch/2);
+    ctx.drawImage(video, cover.dx, cover.dy, cover.drawW, cover.drawH);
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(cw/2, ch/2);
+    buildShapePath(ctx, SHAPES[shapeIndex], scale);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(250,246,236,0.85)';
+    ctx.stroke();
+    ctx.restore();
+
+    requestAnimationFrame(draw);
+  }
+
+  // ---------- gestures: tap = capture, swipe = change shape ----------
+  let touchStartX = 0, touchStartY = 0, touchStartT = 0, moved = 0;
+
+  function onStart(x, y){ touchStartX = x; touchStartY = y; touchStartT = Date.now(); moved = 0; }
+  function onMove(x, y){ moved = Math.max(moved, Math.abs(x-touchStartX), Math.abs(y-touchStartY)); }
+  function onEnd(x, y){
+    const dx = x-touchStartX, dt = Date.now()-touchStartT;
+    if (Math.abs(dx) > 46 && Math.abs(dx) > Math.abs(y-touchStartY)){
+      shapeIndex = (shapeIndex + (dx < 0 ? 1 : -1) + SHAPES.length) % SHAPES.length;
+      renderDots();
+    } else if (moved < 14 && dt < 450){
+      handleTap();
+    }
+  }
+
+  canvas.addEventListener('touchstart', e => { const t = e.changedTouches[0]; onStart(t.clientX, t.clientY); }, { passive: true });
+  canvas.addEventListener('touchmove',  e => { const t = e.changedTouches[0]; onMove(t.clientX, t.clientY); }, { passive: true });
+  canvas.addEventListener('touchend',   e => { const t = e.changedTouches[0]; onEnd(t.clientX, t.clientY); }, { passive: true });
+
+  let mouseDown = false;
+  canvas.addEventListener('pointerdown', e => { mouseDown = true; onStart(e.clientX, e.clientY); });
+  canvas.addEventListener('pointermove', e => { if (mouseDown) onMove(e.clientX, e.clientY); });
+  window.addEventListener('pointerup', e => { if (mouseDown){ mouseDown = false; onEnd(e.clientX, e.clientY); } });
+
+  function renderDots(){
+    dotsEl.innerHTML = SHAPES.map((s, i) => `<div class="dot ${i===shapeIndex?'active':''}"></div>`).join('');
+  }
+  renderDots();
+
+  setTimeout(() => hint.classList.add('hidden'), 4200);
+
+  // ---------- audio: a soft press, not a shutter click ----------
+  let actx;
+  function thunk(){
+    try{
+      actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+      const t0 = actx.currentTime;
+
+      const osc = actx.createOscillator();
+      const gain = actx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(180, t0);
+      osc.frequency.exponentialRampToValueAtTime(60, t0+0.18);
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.exponentialRampToValueAtTime(0.35, t0+0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0+0.22);
+      osc.connect(gain).connect(actx.destination);
+      osc.start(t0); osc.stop(t0+0.24);
+
+      const noise = actx.createBufferSource();
+      const buf = actx.createBuffer(1, actx.sampleRate*0.05, actx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = (Math.random()*2-1)*(1-i/data.length);
+      noise.buffer = buf;
+      const nGain = actx.createGain();
+      nGain.gain.setValueAtTime(0.18, t0);
+      noise.connect(nGain).connect(actx.destination);
+      noise.start(t0);
+    } catch (e){ /* audio is a nice-to-have, never block capture on it */ }
+  }
+
+  // ---------- capture ----------
+  function handleTap(){
+    if (cooldown || captionSheet.classList.contains('show')) return;
+    captureStamp();
+  }
+
+  function captureStamp(){
+    if (!video.videoWidth) return;
+    cooldown = true;
+
+    flashEl.style.transition = 'none';
+    flashEl.style.opacity = '0.85';
+    requestAnimationFrame(() => {
+      flashEl.style.transition = 'opacity .6s ease';
+      flashEl.style.opacity = '0';
+    });
+    thunk();
+
+    const type = SHAPES[shapeIndex];
+    const scale = shapeScale();
+    const frame = shapeFrame(type, scale);
+
+    const off = document.createElement('canvas');
+    off.width = Math.ceil(frame.w);
+    off.height = Math.ceil(frame.h);
+    const octx = off.getContext('2d');
+
+    const vw = video.videoWidth, vh = video.videoHeight;
+    const cover = coverParams(vw, vh, cw, ch);
+    const offsetX = frame.tx + cover.dx - cw/2;
+    const offsetY = frame.ty + cover.dy - ch/2;
+
+    octx.save();
+    octx.translate(frame.tx, frame.ty);
+    buildShapePath(octx, type, scale);
+    octx.clip();
+    octx.translate(-frame.tx, -frame.ty);
+    octx.drawImage(video, offsetX, offsetY, cover.drawW, cover.drawH);
+    octx.restore();
+
+    octx.save();
+    octx.translate(frame.tx, frame.ty);
+    buildShapePath(octx, type, scale);
+    octx.lineWidth = Math.max(3, scale*0.012);
+    octx.strokeStyle = '#B5391C';
+    octx.stroke();
+    octx.restore();
+
+    pendingStamp = { dataURL: off.toDataURL('image/png'), shape: type, ts: Date.now() };
+    openCaptionSheet();
+
+    setTimeout(() => { cooldown = false; }, COOLDOWN_MS);
+  }
+
+  function timeLabel(ts){
+    return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function openCaptionSheet(){
+    captionInput.value = '';
+    captionInput.placeholder = timeLabel(pendingStamp.ts);
+    captionSheet.classList.add('show');
+    setTimeout(() => captionInput.focus(), 350);
+  }
+  function closeCaptionSheet(){
+    captionSheet.classList.remove('show');
+    captionInput.blur();
+  }
+
+  function commitStamp(caption){
+    if (!pendingStamp) return;
+    album.unshift({
+      id: pendingStamp.ts + '-' + Math.random().toString(36).slice(2,7),
+      dataURL: pendingStamp.dataURL,
+      shape: pendingStamp.shape,
+      ts: pendingStamp.ts,
+      caption: caption || timeLabel(pendingStamp.ts)
+    });
+    saveAlbum();
+    pendingStamp = null;
+    closeCaptionSheet();
+  }
+
+  saveBtn.addEventListener('click', () => commitStamp(captionInput.value.trim()));
+  skipBtn.addEventListener('click', () => commitStamp(''));
+
+  // ---------- album ----------
+  function escapeHtml(str){
+    return str.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  }
+
+  function renderAlbum(){
+    if (album.length === 0){
+      albumGrid.innerHTML = '<div class="album-empty">nothing pressed yet &mdash; tap the viewfinder to begin.</div>';
+      return;
+    }
+    albumGrid.innerHTML = album.map(s => `
+      <div class="stamp-card">
+        <img src="${s.dataURL}" alt="">
+        <div class="cap">${escapeHtml(s.caption || '')}</div>
+      </div>
+    `).join('');
+  }
+
+  albumBtn.addEventListener('click', () => { renderAlbum(); albumView.classList.add('show'); });
+  closeAlbumBtn.addEventListener('click', () => albumView.classList.remove('show'));
+  albumCountEl.textContent = album.length;
+
+  // ---------- go ----------
+  resize();
+  startCamera();
+})();
+</script>
+</body>
+</html>
